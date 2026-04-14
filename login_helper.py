@@ -5,7 +5,9 @@ from urllib.parse import urlparse, parse_qs
 
 # Regexes from various checker implementations
 RE_SFTTAG_VALUE = re.compile(r'value="([^"]+)" name="PPFT"')
+RE_SFTTAG_VALUE_ALT = re.compile(r'sFTTag":"<input type=\\"hidden\\" name=\\"PPFT\\" id=\\"[^\\"]+\\" value=\\"([^\\"]+)\\"')
 RE_URLPOST_VALUE = re.compile(r"urlPost:'([^']+)'")
+RE_URLPOST_VALUE_ALT = re.compile(r'urlPost":"([^"]+)"')
 RE_IPT = re.compile(r'ipt: "([^"]+)"')
 RE_PPRID = re.compile(r'pprid: "([^"]+)"')
 RE_UAID = re.compile(r'uaid: "([^"]+)"')
@@ -22,7 +24,7 @@ def microsoft_login(session, email, password):
         # Step 1: Get PPFT and urlPost
         sFTTag_url = (
             "https://login.live.com/oauth20_authorize.srf"
-            "?client_id=000000004C12AE29&response_type=token"
+            "?client_id=00000000402b5328&response_type=token"
             "&scope=service::user.auth.xboxlive.com::MBI_SSL&redirect_uri=https://login.live.com/oauth20_desktop.srf"
         )
         headers = {
@@ -31,8 +33,14 @@ def microsoft_login(session, email, password):
         }
 
         resp = session.get(sFTTag_url, headers=headers, timeout=10)
+
         sft_match = RE_SFTTAG_VALUE.search(resp.text)
+        if not sft_match:
+            sft_match = RE_SFTTAG_VALUE_ALT.search(resp.text)
+
         url_match = RE_URLPOST_VALUE.search(resp.text)
+        if not url_match:
+            url_match = RE_URLPOST_VALUE_ALT.search(resp.text)
 
         if not sft_match or not url_match:
             return None, None
