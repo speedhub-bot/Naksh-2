@@ -1,0 +1,8 @@
+aiogram
+requests
+PySocks
+aiohttp
+pyCraft @ git+https://github.com/ammaraskar/pyCraft.git
+cryptography
+pynbt
+mutf8
