@@ -67,7 +67,7 @@ def fetch_balance(session, email, password, config, fname, write_dedupe, token_c
         try:
             amount_str = re.sub(r'[^\d\.]', '', str(balance))
             if amount_str and float(amount_str) > 0:
-                write_dedupe(fname, 'Microsoft_Balance.txt', f'{email}:{password} | Balance: {balance}\n')
+                write_dedupe(fname, 'Microsoft_Balance.txt', f'{email} | Balance: {balance}\n')
                 return balance
         except Exception:
             pass

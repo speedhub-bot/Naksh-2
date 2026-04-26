@@ -33,7 +33,7 @@ class Database:
                     hit_notifications INTEGER DEFAULT 1,
                     result_type TEXT DEFAULT 'all',
                     file_format TEXT DEFAULT 'txt',
-                    threads INTEGER DEFAULT 25,
+                    threads INTEGER DEFAULT 1,
                     FOREIGN KEY (user_id) REFERENCES users (user_id)
                 )
             ''')
@@ -99,6 +99,8 @@ class Database:
         with self.lock:
             conn = self.get_connection()
             cursor = conn.cursor()
+            cursor.execute('INSERT OR IGNORE INTO settings (user_id) VALUES (?)', (user_id,))
+            conn.commit()
             cursor.execute('SELECT * FROM settings WHERE user_id = ?', (user_id,))
             settings = cursor.fetchone()
             conn.close()
@@ -145,6 +147,8 @@ class Database:
         with self.lock:
             conn = self.get_connection()
             cursor = conn.cursor()
+            cursor.execute('INSERT OR IGNORE INTO stats (user_id) VALUES (?)', (user_id,))
+            conn.commit()
             cursor.execute('SELECT * FROM stats WHERE user_id = ?', (user_id,))
             stats = cursor.fetchone()
             conn.close()

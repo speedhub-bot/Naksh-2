@@ -1,6 +1,5 @@
 import os
 import asyncio
-import threading
 from aiogram import types, F
 from aiogram.filters import Command
 from database import Database
@@ -10,7 +9,8 @@ from bot_interface import dp, bot, ADMIN_ID, get_main_keyboard
 db = Database()
 queue = asyncio.Queue()
 running_checks = 0
-MAX_CONCURRENT = 3
+MAX_CONCURRENT = max(1, int(os.getenv("MAX_CONCURRENT_CHECKS", "1")))
+MAX_UPLOAD_ACCOUNTS = max(1, int(os.getenv("MAX_UPLOAD_ACCOUNTS", "1")))
 queue_lock = asyncio.Lock()
 temp_combos = {}
 waiting_for_threads = set()
@@ -41,8 +41,12 @@ async def worker():
 async def run_checker(task):
     user_settings = db.get_settings(task.user_id)
     user = db.get_user(task.user_id)
+    if not user or user[3] not in ['authorized', 'admin']:
+        await task.message.edit_text("🚫 You are not authorized to use the checker.")
+        return
+
     is_admin = user[3] == 'admin'
-    max_threads = 50 if is_admin else 25
+    max_threads = 5 if is_admin else 3
     threads = min(user_settings[4], max_threads)
 
     loop = asyncio.get_event_loop()
@@ -105,16 +109,8 @@ async def handle_document(message: types.Message):
     file_name = message.document.file_name.lower()
 
     if "proxy" in file_name or (message.caption and "proxy" in message.caption.lower()):
-        if user_id not in temp_combos:
-            await message.reply("⚠️ Please upload combos first.")
-            return
-
-        file = await bot.get_file(message.document.file_id)
-        content = (await bot.download_file(file.file_path)).read().decode('utf-8', errors='ignore').splitlines()
-        proxies = [p.strip() for p in content if p.strip()]
-
-        combos = temp_combos.pop(user_id)
-        await add_to_queue(user_id, combos, proxies, message)
+        await message.reply("⚠️ Proxy files are disabled. Use /noproxy for authorized own-account checks.")
+        return
     else:
         if not file_name.endswith('.txt'):
             await message.reply("⚠️ Please upload a .txt file containing combos (email:pass).")
@@ -127,9 +123,12 @@ async def handle_document(message: types.Message):
         if not combos:
             await message.reply("⚠️ No valid combos found in the file.")
             return
+        if len(combos) > MAX_UPLOAD_ACCOUNTS:
+            await message.reply(f"⚠️ Uploads are limited to {MAX_UPLOAD_ACCOUNTS} own account(s) at a time.")
+            return
 
         temp_combos[user_id] = combos
-        await message.reply("🔗 Send your proxy file (.txt) or type /noproxy to continue without proxies.")
+        await message.reply("Type /noproxy to continue without proxies.")
 
 @dp.message(Command("noproxy"))
 async def no_proxy(message: types.Message):
@@ -148,7 +147,7 @@ async def add_to_queue(user_id, combos, proxies, message):
 
 @dp.callback_query(F.data == "set_threads")
 async def set_threads_prompt(callback: types.CallbackQuery):
-    await callback.message.edit_text("🧵 <b>Set Threads</b>\nPlease type the number of threads you want to use (Max 50 for Admin, 25 for others).", parse_mode="HTML")
+    await callback.message.edit_text("🧵 <b>Set Threads</b>\nPlease type the number of threads you want to use (Max 5 for Admin, 3 for others).", parse_mode="HTML")
     waiting_for_threads.add(callback.from_user.id)
 
 @dp.message(lambda message: message.from_user.id in waiting_for_threads)
@@ -157,10 +156,12 @@ async def handle_set_threads(message: types.Message):
     waiting_for_threads.remove(user_id)
     try:
         val = int(message.text)
-        if val < 1: val = 1
+        if val < 1:
+            val = 1
         user = db.get_user(user_id)
-        max_val = 50 if user[3] == 'admin' else 25
-        if val > max_val: val = max_val
+        max_val = 5 if user and user[3] == 'admin' else 3
+        if val > max_val:
+            val = max_val
 
         db.update_settings(user_id, threads=val)
         await message.reply(f"✅ Threads set to {val}.", reply_markup=get_main_keyboard(user_id))

@@ -83,6 +83,6 @@ def fetch_rewards(session, email, password, config, fname, write_dedupe, token_c
         return None
     points = check_rewards_points(session, config, token_cache)
     if points:
-        write_dedupe(fname, 'Ms_Points.txt', f'{email}:{password} | Points: {points}\n')
+        write_dedupe(fname, 'Ms_Points.txt', f'{email} | Points: {points}\n')
         return points
     return None

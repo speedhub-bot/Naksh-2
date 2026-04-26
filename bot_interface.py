@@ -1,13 +1,20 @@
 import os
-import asyncio
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from database import Database
 
-# Use environment variable for token, fallback to user provided one for convenience if not set
-TOKEN = os.getenv("BOT_TOKEN", "8459126546:AAHN9oT3OzcM74yHPINr7mjJWHTyYbvkn_g")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "5944410248"))
+TOKEN = os.getenv("BOT_TOKEN")
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN environment variable is required")
+
+try:
+    ADMIN_ID = int(os.getenv("ADMIN_ID", ""))
+except ValueError as exc:
+    raise RuntimeError("ADMIN_ID environment variable must be an integer") from exc
+
+if not ADMIN_ID:
+    raise RuntimeError("ADMIN_ID environment variable is required")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
@@ -21,6 +28,13 @@ def get_main_keyboard(user_id):
     if user_id == ADMIN_ID:
         builder.row(types.InlineKeyboardButton(text="👑 Admin Panel", callback_data="admin_panel"))
     return builder.as_markup()
+
+async def require_authorized(callback: types.CallbackQuery):
+    user = db.get_user(callback.from_user.id)
+    if not user or user[3] not in {'authorized', 'admin'}:
+        await callback.answer("You are not authorized to use this bot.", show_alert=True)
+        return None
+    return user
 
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
@@ -55,7 +69,9 @@ async def cmd_start(message: types.Message):
 
 @dp.callback_query(F.data == "profile")
 async def process_profile(callback: types.CallbackQuery):
-    user = db.get_user(callback.from_user.id)
+    user = await require_authorized(callback)
+    if not user:
+        return
     stats = db.get_user_stats(callback.from_user.id)
     text = (
         f"👤 <b>Your Profile</b>\n"
@@ -76,6 +92,8 @@ async def process_profile(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "my_stats")
 async def process_my_stats(callback: types.CallbackQuery):
+    if not await require_authorized(callback):
+        return
     stats = db.get_user_stats(callback.from_user.id)
     text = (
         f"📊 <b>Your Statistics</b>\n"
@@ -91,26 +109,34 @@ async def process_my_stats(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "configure")
 async def process_configure(callback: types.CallbackQuery):
+    user = await require_authorized(callback)
+    if not user:
+        return
     settings = db.get_settings(callback.from_user.id)
-    # settings: user_id, hit_notifications, result_type, file_format, threads
+    max_threads = 5 if user[3] == 'admin' else 3
+    threads = min(settings[4], max_threads)
 
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text=f"🔔 Notifications: {'ON' if settings[1] else 'OFF'}", callback_data="toggle_notif"))
     builder.row(types.InlineKeyboardButton(text=f"📄 Results: {settings[2].upper()}", callback_data="toggle_res_type"))
     builder.row(types.InlineKeyboardButton(text=f"📦 Format: {settings[3].upper()}", callback_data="toggle_format"))
-    builder.row(types.InlineKeyboardButton(text=f"🧵 Threads: {settings[4]}", callback_data="set_threads"))
+    builder.row(types.InlineKeyboardButton(text=f"🧵 Threads: {threads}", callback_data="set_threads"))
     builder.row(types.InlineKeyboardButton(text="🔙 Back", callback_data="back_to_main"))
 
     await callback.message.edit_text("⚙️ <b>Bot Configuration</b>\nCustomize your experience below:", parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data == "toggle_notif")
 async def toggle_notif(callback: types.CallbackQuery):
+    if not await require_authorized(callback):
+        return
     settings = db.get_settings(callback.from_user.id)
     db.update_settings(callback.from_user.id, hit_notifications=1 if not settings[1] else 0)
     await process_configure(callback)
 
 @dp.callback_query(F.data == "toggle_res_type")
 async def toggle_res_type(callback: types.CallbackQuery):
+    if not await require_authorized(callback):
+        return
     settings = db.get_settings(callback.from_user.id)
     new_type = "hits" if settings[2] == "all" else "all"
     db.update_settings(callback.from_user.id, result_type=new_type)
@@ -118,6 +144,8 @@ async def toggle_res_type(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "toggle_format")
 async def toggle_format(callback: types.CallbackQuery):
+    if not await require_authorized(callback):
+        return
     settings = db.get_settings(callback.from_user.id)
     new_format = "zip" if settings[3] == "txt" else "txt"
     db.update_settings(callback.from_user.id, file_format=new_format)
@@ -125,6 +153,8 @@ async def toggle_format(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "back_to_main")
 async def back_to_main(callback: types.CallbackQuery):
+    if not await require_authorized(callback):
+        return
     await callback.message.edit_text(
         f"🚀 <b>Ultimate Minecraft Bot</b>\n\nWelcome back, {callback.from_user.first_name}!",
         parse_mode="HTML",
@@ -133,7 +163,9 @@ async def back_to_main(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "admin_panel")
 async def admin_panel(callback: types.CallbackQuery):
-    if callback.from_user.id != ADMIN_ID: return
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Admin access required.", show_alert=True)
+        return
 
     global_stats = db.get_global_stats()
     users = db.get_all_users()
@@ -154,14 +186,15 @@ async def admin_panel(callback: types.CallbackQuery):
 
     builder = InlineKeyboardBuilder()
     builder.row(types.InlineKeyboardButton(text="⏳ Manage Pending", callback_data="manage_pending"))
-    builder.row(types.InlineKeyboardButton(text="🚫 Ban User", callback_data="manage_ban"))
-    builder.row(types.InlineKeyboardButton(text="🌍 Full Statistics", callback_data="global_stats_full"))
     builder.row(types.InlineKeyboardButton(text="🔙 Back", callback_data="back_to_main"))
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=builder.as_markup())
 
 @dp.callback_query(F.data == "manage_pending")
 async def manage_pending(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Admin access required.", show_alert=True)
+        return
     users = db.get_all_users()
     pending = [u for u in users if u[2] == 'pending']
 
@@ -178,6 +211,9 @@ async def manage_pending(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data.startswith("auth_"))
 async def authorize_user(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Admin access required.", show_alert=True)
+        return
     user_id = int(callback.data.split("_")[1])
     db.update_user_role(user_id, 'authorized')
     try:
