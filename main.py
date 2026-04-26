@@ -15,6 +15,10 @@ queue_lock = asyncio.Lock()
 temp_combos = {}
 waiting_for_threads = set()
 
+def is_authorized(user_id):
+    user = db.get_user(user_id)
+    return bool(user and user[3] in ['authorized', 'admin'])
+
 class CheckTask:
     def __init__(self, user_id, combo_data, proxy_data, message):
         self.user_id = user_id
@@ -133,6 +137,10 @@ async def handle_document(message: types.Message):
 @dp.message(Command("noproxy"))
 async def no_proxy(message: types.Message):
     user_id = message.from_user.id
+    if not is_authorized(user_id):
+        await message.reply("🚫 You are not authorized to use the checker.")
+        return
+
     if user_id not in temp_combos:
         await message.reply("⚠️ Please upload combos first.")
         return
@@ -147,6 +155,10 @@ async def add_to_queue(user_id, combos, proxies, message):
 
 @dp.callback_query(F.data == "set_threads")
 async def set_threads_prompt(callback: types.CallbackQuery):
+    if not is_authorized(callback.from_user.id):
+        await callback.answer("You are not authorized to use this bot.", show_alert=True)
+        return
+
     await callback.message.edit_text("🧵 <b>Set Threads</b>\nPlease type the number of threads you want to use (Max 5 for Admin, 3 for others).", parse_mode="HTML")
     waiting_for_threads.add(callback.from_user.id)
 
@@ -154,6 +166,10 @@ async def set_threads_prompt(callback: types.CallbackQuery):
 async def handle_set_threads(message: types.Message):
     user_id = message.from_user.id
     waiting_for_threads.remove(user_id)
+    if not is_authorized(user_id):
+        await message.reply("🚫 You are not authorized to use the checker.")
+        return
+
     try:
         val = int(message.text)
         if val < 1:
