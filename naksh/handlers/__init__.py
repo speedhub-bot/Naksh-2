@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from . import admin, settings, start, upload
+from . import admin, dashboard, settings, start, upload
 
 
 def register_all(app) -> None:
@@ -11,3 +11,4 @@ def register_all(app) -> None:
     settings.register(app)
     upload.register(app)
     admin.register(app)
+    dashboard.register(app)
