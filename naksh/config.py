@@ -38,6 +38,7 @@ class Settings:
 
     # Feature toggles
     hypixel_ban_check: bool = _env("HYPIXEL_BAN_CHECK", "1") not in ("0", "false", "no")
+    donut_ban_check: bool = _env("DONUT_BAN_CHECK", "1") not in ("0", "false", "no")
 
     # Concurrency & limits
     max_concurrent_jobs: int = _env_int("MAX_CONCURRENT_JOBS", 2)

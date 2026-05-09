@@ -3,3 +3,4 @@ tgcrypto>=1.2.5
 requests>=2.31
 PySocks>=1.7.1
 urllib3>=1.26
+cryptography>=41.0.0

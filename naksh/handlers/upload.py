@@ -165,6 +165,7 @@ def register(app) -> None:
             combos=combos, proxies=proxies, threads=threads,
             progress=progress, results=results, on_hit=on_hit,
             hypixel_ban_check=SETTINGS.hypixel_ban_check,
+            donut_ban_check=SETTINGS.donut_ban_check,
         )
 
         async def progress_loop() -> None:

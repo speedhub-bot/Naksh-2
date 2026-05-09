@@ -38,6 +38,9 @@ class Capture:
     donut_kills: int | None = None
     donut_playtime: str | None = None
     donut_banned: bool | None = None
+    donut_ban_reason: str | None = None
+    donut_ban_time_left: str | None = None
+    donut_ban_id: str | None = None
 
     # ---- Microsoft basic ------------------------------------------------
     ms_balance: str | None = None
@@ -99,6 +102,11 @@ class Capture:
             stats.append(f"SB_Coins: {self.skyblock_coins}")
         if self.donut_money:
             stats.append(f"Donut$: {self.donut_money}")
+        if self.donut_banned:
+            tag = "Donut_Banned"
+            if self.donut_ban_id:
+                tag += f"#{self.donut_ban_id}"
+            stats.append(tag)
         if self.ms_balance:
             stats.append(f"MS_Bal: {self.ms_balance}")
         if self.ms_rewards:
