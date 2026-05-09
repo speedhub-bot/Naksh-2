@@ -53,6 +53,7 @@ def register(app) -> None:
             "📥 Drop a <code>.txt</code> combo file (email:pass per line) to start.\n"
             "🔌 Optional: send a proxy <code>.txt</code> right after — "
             "or send /noproxy to run without proxies.\n\n"
+            "📊 /dashboard — your lifetime stats + last-job summary\n"
             "Use the buttons below to manage your settings.\n\n"
             "Credits: @akaza_isnt",
             reply_markup=main_keyboard(user.id),

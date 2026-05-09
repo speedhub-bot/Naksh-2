@@ -36,6 +36,9 @@ class Settings:
     donut_api_key: str = _env("DONUT_API_KEY", "")
     hypixel_api_key: str = _env("HYPIXEL_API_KEY", "")
 
+    # Feature toggles
+    hypixel_ban_check: bool = _env("HYPIXEL_BAN_CHECK", "1") not in ("0", "false", "no")
+
     # Concurrency & limits
     max_concurrent_jobs: int = _env_int("MAX_CONCURRENT_JOBS", 2)
     threads_default: int = _env_int("THREADS_DEFAULT", 25)

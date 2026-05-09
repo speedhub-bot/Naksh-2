@@ -46,7 +46,12 @@ def _pifd_token(session: requests.Session, cache: dict | None = None) -> Optiona
 
 def fetch_balance(
     session: requests.Session, cache: dict | None = None,
-) -> Optional[str]:
+) -> Optional[tuple[str, float, str]]:
+    """Return ``(display, value, currency)`` or ``None`` if unavailable / zero.
+
+    The numeric ``value`` makes it possible to sort the final ``MS_Balance.txt``
+    by largest balance.
+    """
     token = _pifd_token(session, cache)
     if not token:
         return None
@@ -64,10 +69,15 @@ def fetch_balance(
         if not bal:
             return None
         amount = bal.group(1)
-        if float(amount) <= 0:
+        try:
+            value = float(amount)
+        except ValueError:
             return None
-        cur = re.search(r'"currency":"([A-Z]{3})"', r.text)
-        return f"{amount} {cur.group(1) if cur else 'USD'}"
+        if value <= 0:
+            return None
+        cur_match = re.search(r'"currency":"([A-Z]{3})"', r.text)
+        currency = cur_match.group(1) if cur_match else "USD"
+        return f"{amount} {currency}", value, currency
     except (requests.RequestException, ValueError):
         return None
 
@@ -103,7 +113,7 @@ def fetch_payment_methods(
         return []
 
 
-def fetch_rewards_points(session: requests.Session) -> Optional[str]:
+def fetch_rewards_points(session: requests.Session) -> Optional[tuple[str, int]]:
     """Fetch Bing Rewards points balance for a logged-in MSA."""
     try:
         headers = {
@@ -128,7 +138,7 @@ def fetch_rewards_points(session: requests.Session) -> Optional[str]:
         if all_matches:
             best = max(all_matches, key=int)
             if best != "0":
-                return best
+                return best, int(best)
     except requests.RequestException:
         pass
 
@@ -147,7 +157,9 @@ def fetch_rewards_points(session: requests.Session) -> Optional[str]:
             data = r.json()
             info = data.get("userInfo") or {}
             if info.get("isRewardsUser") and info.get("balance") is not None:
-                return str(info["balance"])
+                bal = int(info["balance"])
+                if bal > 0:
+                    return str(bal), bal
     except (requests.RequestException, ValueError):
         pass
     return None
