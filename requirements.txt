@@ -1,8 +1,5 @@
-aiogram
-requests
-PySocks
-aiohttp
-pyCraft @ git+https://github.com/ammaraskar/pyCraft.git
-cryptography
-pynbt
-mutf8
+pyrogram>=2.0.106
+tgcrypto>=1.2.5
+requests>=2.31
+PySocks>=1.7.1
+urllib3>=1.26
